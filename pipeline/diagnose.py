@@ -35,13 +35,6 @@ def main():
     check("ffmpeg", ok, v.splitlines()[0] if ok else "introuvable — brew/apt install ffmpeg")
     if not ok: errors += 1
 
-    # libass
-    if ok:
-        r = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
-        has_ass = "--enable-libass" in r.stdout
-        check("ffmpeg libass", has_ass, "présent" if has_ass else "build sans libass — réinstalle ffmpeg")
-        if not has_ass: errors += 1
-
     # python
     v = sys.version.split()[0]
     check("Python", True, v)
