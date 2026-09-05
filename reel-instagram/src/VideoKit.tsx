@@ -34,14 +34,145 @@ function groupLines(words: Word[], n: number): Word[][] {
   return out;
 }
 
-// Animation style alterne pour chaque ligne
-type AnimStyle = 'slideUp' | 'slideLeft' | 'zoom' | 'drop';
-function getAnimStyle(lineIdx: number): AnimStyle {
-  const styles: AnimStyle[] = ['slideUp', 'slideLeft', 'zoom', 'drop'];
-  return styles[lineIdx % styles.length];
-}
+// Palette de couleurs de fond pour les cartes (varie selon la ligne)
+const CARD_PALETTES = [
+  { bg: '#0F0F0F', accent: '#FFE600', text: '#FFFFFF' },
+  { bg: '#1A0A2E', accent: '#C084FC', text: '#FFFFFF' },
+  { bg: '#0A1628', accent: '#38BDF8', text: '#FFFFFF' },
+  { bg: '#0D1F0D', accent: '#4ADE80', text: '#FFFFFF' },
+  { bg: '#1F0A0A', accent: '#F87171', text: '#FFFFFF' },
+  { bg: '#1A1200', accent: '#FBBF24', text: '#FFFFFF' },
+];
 
-// ─── Mot animé ────────────────────────────────────────────────────────────────
+// Types de transition de carte
+type CardTransition = 'slideFromRight' | 'slideFromLeft' | 'scaleUp' | 'slideFromTop';
+const TRANSITIONS: CardTransition[] = ['slideFromRight', 'slideFromLeft', 'scaleUp', 'slideFromTop'];
+
+// ─── Carte animée (zone haute) ───────────────────────────────────────────────
+
+const TopCard: React.FC<{
+  line: Word[];
+  lineIdx: number;
+  frame: number;
+  fps: number;
+  width: number;
+  height: number;
+  accentColor: string;
+}> = ({ line, lineIdx, frame, fps, width, height, accentColor }) => {
+  const lineStartFrame = Math.round(line[0].start * fps);
+  const elapsed = frame - lineStartFrame;
+
+  const palette = CARD_PALETTES[lineIdx % CARD_PALETTES.length];
+  const transition = TRANSITIONS[lineIdx % TRANSITIONS.length];
+
+  const prog = spring({
+    frame: elapsed,
+    fps,
+    config: { damping: 16, stiffness: 220, mass: 0.5 },
+  });
+
+  let translateX = 0;
+  let translateY = 0;
+  let scale = 1;
+
+  if (transition === 'slideFromRight') {
+    translateX = interpolate(prog, [0, 1], [width, 0], { extrapolateRight: 'clamp' });
+  } else if (transition === 'slideFromLeft') {
+    translateX = interpolate(prog, [0, 1], [-width, 0], { extrapolateRight: 'clamp' });
+  } else if (transition === 'scaleUp') {
+    scale = interpolate(prog, [0, 1], [0.6, 1.0], { extrapolateRight: 'clamp' });
+  } else if (transition === 'slideFromTop') {
+    translateY = interpolate(prog, [0, 1], [-height, 0], { extrapolateRight: 'clamp' });
+  }
+
+  const opacity = interpolate(elapsed, [0, 3], [0, 1], { extrapolateRight: 'clamp' });
+
+  // Mot principal = le plus long de la ligne (le plus "signifiant")
+  const mainWord = line.reduce((a, b) => (b.word.length > a.word.length ? b : a)).word.trim().toUpperCase();
+  // Contexte = tous les mots sauf le principal
+  const context = line.map(w => w.word.trim()).join(' ');
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: palette.bg,
+        transform: `translateX(${translateX}px) translateY(${translateY}px) scale(${scale})`,
+        opacity,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '40px 50px',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Barre accent gauche */}
+      <div style={{
+        position: 'absolute',
+        left: 0, top: '20%', bottom: '20%',
+        width: 8,
+        background: palette.accent,
+        borderRadius: '0 4px 4px 0',
+      }} />
+
+      {/* Numéro de ligne (style UI) */}
+      <div style={{
+        position: 'absolute',
+        top: 24, right: 28,
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        fontWeight: 900,
+        fontSize: 22,
+        color: `${palette.accent}55`,
+        letterSpacing: 4,
+      }}>
+        {String(lineIdx + 1).padStart(2, '0')}
+      </div>
+
+      {/* Mot principal en très grand */}
+      <div style={{
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        fontWeight: 900,
+        fontSize: 88,
+        color: palette.accent,
+        letterSpacing: -3,
+        lineHeight: 0.9,
+        textAlign: 'center',
+        WebkitTextStroke: '2px rgba(0,0,0,0.3)',
+        paintOrder: 'stroke fill',
+        marginBottom: 16,
+        maxWidth: '100%',
+        wordBreak: 'break-word',
+      }}>
+        {mainWord}
+      </div>
+
+      {/* Phrase complète en dessous, petite */}
+      <div style={{
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        fontWeight: 700,
+        fontSize: 28,
+        color: `${palette.text}88`,
+        textAlign: 'center',
+        letterSpacing: 1,
+        maxWidth: '90%',
+      }}>
+        {context}
+      </div>
+
+      {/* Ligne déco bas */}
+      <div style={{
+        position: 'absolute',
+        bottom: 20, left: 50, right: 50,
+        height: 2,
+        background: `linear-gradient(to right, ${palette.accent}00, ${palette.accent}, ${palette.accent}00)`,
+      }} />
+    </div>
+  );
+};
+
+// ─── Mot animé (sous-titres) ─────────────────────────────────────────────────
 
 const WordSpan: React.FC<{
   text: string;
@@ -54,14 +185,14 @@ const WordSpan: React.FC<{
   primaryColor: string;
 }> = ({ text, isActive, isPast, frame, startFrame, fps, accentColor, primaryColor }) => {
   const progress = isActive
-    ? spring({ frame: frame - startFrame, fps, config: { damping: 6, stiffness: 500, mass: 0.2 } })
+    ? spring({ frame: frame - startFrame, fps, config: { damping: 7, stiffness: 480, mass: 0.2 } })
     : 1;
 
   const scale = isActive
-    ? interpolate(progress, [0, 0.5, 1], [1.8, 0.9, 1.0], { extrapolateRight: 'clamp' })
+    ? interpolate(progress, [0, 0.45, 1], [1.7, 0.92, 1.0], { extrapolateRight: 'clamp' })
     : 1;
 
-  const color = isActive ? accentColor : isPast ? `${primaryColor}60` : primaryColor;
+  const color = isActive ? accentColor : isPast ? `${primaryColor}55` : primaryColor;
 
   return (
     <span
@@ -75,9 +206,9 @@ const WordSpan: React.FC<{
         WebkitTextStroke: '5px #000',
         paintOrder: 'stroke fill',
         filter: isActive
-          ? `drop-shadow(0 0 20px ${accentColor}) drop-shadow(0 0 40px ${accentColor}88)`
+          ? `drop-shadow(0 0 16px ${accentColor}CC) drop-shadow(0 0 32px ${accentColor}55)`
           : 'none',
-        transition: 'color 40ms, filter 80ms',
+        transition: 'color 40ms',
       }}
     >
       {text}
@@ -85,7 +216,7 @@ const WordSpan: React.FC<{
   );
 };
 
-// ─── Ligne avec animation variée ──────────────────────────────────────────────
+// ─── Ligne sous-titres (slide-up simple) ─────────────────────────────────────
 
 const SubtitleLine: React.FC<{
   line: Word[];
@@ -100,50 +231,25 @@ const SubtitleLine: React.FC<{
   const lineStartFrame = Math.round(line[0].start * fps);
   const elapsed = frame - lineStartFrame;
 
-  const prog = spring({
-    frame: elapsed,
-    fps,
-    config: { damping: 12, stiffness: 280, mass: 0.45 },
-  });
-
-  const style = getAnimStyle(lineIdx);
-
-  let translateX = 0;
-  let translateY = 0;
-  let scale = 1;
-  let rotateZ = 0;
-
-  if (style === 'slideUp') {
-    translateY = interpolate(prog, [0, 1], [70, 0], { extrapolateRight: 'clamp' });
-  } else if (style === 'slideLeft') {
-    translateX = interpolate(prog, [0, 1], [-120, 0], { extrapolateRight: 'clamp' });
-    translateY = interpolate(prog, [0, 1], [20, 0], { extrapolateRight: 'clamp' });
-  } else if (style === 'zoom') {
-    scale = interpolate(prog, [0, 1], [2.2, 1.0], { extrapolateRight: 'clamp' });
-  } else if (style === 'drop') {
-    translateY = interpolate(prog, [0, 1], [-60, 0], { extrapolateRight: 'clamp' });
-    rotateZ = interpolate(prog, [0, 1], [-4, 0], { extrapolateRight: 'clamp' });
-  }
-
+  const prog = spring({ frame: elapsed, fps, config: { damping: 14, stiffness: 300, mass: 0.4 } });
+  const translateY = interpolate(prog, [0, 1], [50, 0], { extrapolateRight: 'clamp' });
   const opacity = interpolate(elapsed, [0, 4], [0, 1], { extrapolateRight: 'clamp' });
 
   return (
-    <div
-      style={{
-        display: 'inline-flex',
-        flexWrap: 'wrap',
-        justifyContent: 'center',
-        fontSize,
-        fontFamily: '"Arial Black", "Helvetica Neue", Arial, sans-serif',
-        fontWeight: 900,
-        letterSpacing: '-0.01em',
-        lineHeight: 1.15,
-        transform: `translateX(${translateX}px) translateY(${translateY}px) scale(${scale}) rotate(${rotateZ}deg)`,
-        opacity,
-        padding: '0 24px',
-        maxWidth: '100%',
-      }}
-    >
+    <div style={{
+      display: 'inline-flex',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      fontSize,
+      fontFamily: '"Arial Black", "Helvetica Neue", Arial, sans-serif',
+      fontWeight: 900,
+      letterSpacing: '-0.01em',
+      lineHeight: 1.15,
+      transform: `translateY(${translateY}px)`,
+      opacity,
+      padding: '0 24px',
+      maxWidth: '100%',
+    }}>
       {line.map((w, idx) => (
         <WordSpan
           key={`${lineIdx}-${idx}`}
@@ -168,7 +274,7 @@ export const VideoKit: React.FC<VideoKitProps> = ({
   words,
   accentColor = '#FFE600',
   primaryColor = '#FFFFFF',
-  fontSize = 72,
+  fontSize = 70,
   wordsPerLine = 4,
   useSounds = false,
   popSoundFile = 'pop.wav',
@@ -197,99 +303,73 @@ export const VideoKit: React.FC<VideoKitProps> = ({
       )
     : -1;
 
-  // Zoom punch sur le visage à chaque nouvelle ligne
-  const lineStartFrame = currentLine ? Math.round(currentLine[0].start * fps) : 0;
-  const punchProgress  = currentLine
-    ? spring({ frame: frame - lineStartFrame, fps, config: { damping: 10, stiffness: 500, mass: 0.2 } })
-    : 1;
-  const faceScale = interpolate(punchProgress, [0, 0.4, 1], [1.12, 0.97, 1.0], { extrapolateRight: 'clamp' });
-
-  // Zoom d'intro global
-  const introProgress = spring({ frame, fps, config: { damping: 22, stiffness: 40, mass: 1 } });
-  const introScale    = interpolate(introProgress, [0, 1], [1.08, 1.0], { extrapolateRight: 'clamp' });
-
-  // Flash de couleur sur mot actif
-  const flashOpacity = activeWordIdx >= 0
-    ? interpolate(
-        spring({ frame: frame - Math.round((currentLine?.[activeWordIdx]?.start ?? 0) * fps), fps,
-          config: { damping: 8, stiffness: 600, mass: 0.15 } }),
-        [0, 1], [0.15, 0],
-        { extrapolateRight: 'clamp' }
-      )
-    : 0;
-
   return (
     <AbsoluteFill style={{ background: '#000' }}>
 
-      {/* ── Zone haute : vidéo floutée ── */}
-      <div style={{ position: 'absolute', top: 0, left: 0, width, height: topHeight, overflow: 'hidden' }}>
-        <Video
-          src={staticFile(videoFile)}
-          style={{
-            width: '100%',
-            height: '220%',
-            objectFit: 'cover',
-            objectPosition: 'center 25%',
-            filter: 'blur(22px) brightness(0.45) saturate(1.6)',
-            transform: 'scale(1.15)',
-          }}
-        />
+      {/* ── Zone haute : cartes animées ── */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, width, height: topHeight, overflow: 'hidden',
+      }}>
+        {/* Fond par défaut quand pas de ligne active */}
+        <div style={{ position: 'absolute', inset: 0, background: '#0A0A0A' }} />
+
+        {/* Affiche la carte de la ligne courante ET la précédente (pour transition) */}
+        {lines.map((line, idx) => {
+          const lineStart = Math.round(line[0].start * fps);
+          const lineEnd   = Math.round(line[line.length - 1].end * fps);
+          const isVisible = frame >= lineStart && frame <= lineEnd + 10;
+          if (!isVisible) return null;
+          return (
+            <TopCard
+              key={idx}
+              line={line}
+              lineIdx={idx}
+              frame={frame}
+              fps={fps}
+              width={width}
+              height={topHeight}
+              accentColor={accentColor}
+            />
+          );
+        })}
+
         {/* Dégradé bas */}
         <div style={{
-          position: 'absolute', bottom: 0, left: 0, width: '100%', height: 100,
+          position: 'absolute', bottom: 0, left: 0, width: '100%', height: 80,
           background: 'linear-gradient(to bottom, transparent, #000)',
-        }} />
-        {/* Dégradé haut */}
-        <div style={{
-          position: 'absolute', top: 0, left: 0, width: '100%', height: 60,
-          background: 'linear-gradient(to top, transparent, #000)',
+          pointerEvents: 'none',
         }} />
       </div>
+
+      {/* ── Séparateur ── */}
+      <div style={{
+        position: 'absolute', top: topHeight - 1, left: 0,
+        width: '100%', height: 2,
+        background: 'rgba(255,255,255,0.08)',
+      }} />
 
       {/* ── Zone basse : face cam ── */}
-      <div style={{ position: 'absolute', top: topHeight, left: 0, width, height: bottomHeight, overflow: 'hidden' }}>
-        <div style={{
-          width: '100%', height: '100%',
-          transform: `scale(${faceScale * introScale})`,
-          transformOrigin: 'center center',
-        }}>
-          <Video
-            src={staticFile(videoFile)}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        </div>
+      <div style={{
+        position: 'absolute', top: topHeight, left: 0, width, height: bottomHeight, overflow: 'hidden',
+      }}>
+        <Video
+          src={staticFile(videoFile)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
         {/* Dégradé haut */}
         <div style={{
-          position: 'absolute', top: 0, left: 0, width: '100%', height: 80,
+          position: 'absolute', top: 0, left: 0, width: '100%', height: 70,
           background: 'linear-gradient(to top, transparent, #000)',
           pointerEvents: 'none',
         }} />
-        {/* Vignette bords */}
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.5) 100%)',
-          pointerEvents: 'none',
-        }} />
       </div>
-
-      {/* ── Flash couleur sur le visage ── */}
-      {flashOpacity > 0 && (
-        <div style={{
-          position: 'absolute', top: topHeight, left: 0, width, height: bottomHeight,
-          background: accentColor,
-          opacity: flashOpacity,
-          pointerEvents: 'none',
-          mixBlendMode: 'overlay',
-        }} />
-      )}
 
       {/* ── Sous-titres à la jonction ── */}
       {currentLine && (
         <div style={{
           position: 'absolute',
-          top: topHeight - 72,
-          left: 0,
-          width,
+          top: topHeight - 68,
+          left: 0, width,
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
