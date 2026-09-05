@@ -206,15 +206,15 @@ def render_with_remotion(duration_sec, words, brand, out_path):
         "videoFile":        "input.mp4",
         "words":            words,
         "durationInFrames": max(1, round(duration_sec * fps)),
-        "accentColor":      sub.get("color_accent", "#E02020"),
-        "primaryColor":     sub.get("color_primary", "#111111"),
-        "bgColor":          brand.get("bg_color", "#ffffff"),
-        "style":            brand.get("style", "light"),
-        "fontSize":         sub.get("font_size", 62),
+        "accentColor":      sub.get("color_accent", "#FFE600"),
+        "primaryColor":     sub.get("color_primary", "#FFFFFF"),
+        "bgColor":          brand.get("bg_color", "#000000"),
+        "style":            brand.get("style", "dark"),
+        "fontSize":         sub.get("font_size", 68),
         "wordsPerLine":     sub.get("words_per_line", 4),
         "popSoundFile":     "pop.wav",
         "whooshSoundFile":  "whoosh.wav",
-        "useSounds":        True,
+        "useSounds":        brand.get("use_sounds", False),
     }
 
     subprocess.run(
