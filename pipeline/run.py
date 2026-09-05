@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
 """
-Claude Video Kit — pipeline gratuit (Whisper + ffmpeg)
-Usage: python run.py <video.mp4>
+Claude Video Kit — pipeline gratuit (Whisper + Remotion + ffmpeg)
+Usage: python run.py <video.mp4> [--broll <broll.mp4>] [--notif]
 """
 
+import argparse
 import json
 import os
-import sys
-import subprocess
-import tempfile
 import shutil
-from pathlib import Path
+import subprocess
+import sys
+import tempfile
 from difflib import SequenceMatcher
+from pathlib import Path
 
 
 def load_brand():
     path = Path(__file__).parent / "brand.json"
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+REPO_ROOT   = Path(__file__).parent.parent
+REMOTION_DIR = REPO_ROOT / "reel-instagram"
+PUBLIC_DIR   = REMOTION_DIR / "public"
 
 
 # ─── Audio ────────────────────────────────────────────────────────────────────
@@ -46,8 +52,7 @@ def detect_silences(audio_path, threshold_db, min_dur):
          "-f", "null", "-"],
         capture_output=True, text=True,
     )
-    silences = []
-    start = None
+    silences, start = [], None
     for line in r.stderr.splitlines():
         if "silence_start" in line:
             start = float(line.split("silence_start: ")[1].split()[0])
@@ -62,58 +67,46 @@ def detect_silences(audio_path, threshold_db, min_dur):
 
 def transcribe(audio_path, brand):
     import whisper
-    cfg = brand.get("transcription", {})
+    cfg   = brand.get("transcription", {})
     model = whisper.load_model(cfg.get("model", "base"))
-    opts = {"word_timestamps": True}
-    lang = cfg.get("language")
-    if lang:
+    opts  = {"word_timestamps": True}
+    if lang := cfg.get("language"):
         opts["language"] = lang
     return model.transcribe(audio_path, **opts)
 
 
 def flatten_words(segments):
-    words = []
-    for seg in segments:
-        for w in seg.get("words", []):
-            if w.get("start") is not None and w.get("end") is not None:
-                words.append(w)
-    return words
+    return [
+        w for seg in segments
+        for w in seg.get("words", [])
+        if w.get("start") is not None and w.get("end") is not None
+    ]
 
 
-# ─── Reprise detection ────────────────────────────────────────────────────────
+# ─── Reprises ─────────────────────────────────────────────────────────────────
 
 def detect_retakes(segments, similarity, window):
-    """
-    Détecte les reprises : séquences de mots répétées.
-    Quand une phrase apparaît plusieurs fois, garde la dernière occurrence.
-    Retourne une liste de (start, end) à supprimer.
-    """
     words = flatten_words(segments)
     if len(words) < window * 2:
         return []
-
-    to_remove = []
-    i = 0
+    to_remove, i = [], 0
     while i < len(words) - window:
         ref = " ".join(w["word"].strip().lower() for w in words[i:i + window])
-        best_j = None
-        best_r = 0.0
+        best_j, best_r = None, 0.0
         for j in range(i + window, len(words) - window + 1):
             cand = " ".join(w["word"].strip().lower() for w in words[j:j + window])
             r = SequenceMatcher(None, ref, cand).ratio()
             if r >= similarity and r > best_r:
-                best_r = r
-                best_j = j
+                best_r, best_j = r, j
         if best_j is not None:
             to_remove.append((words[i]["start"], words[best_j]["start"]))
             i = best_j
         else:
             i += 1
-
     return to_remove
 
 
-# ─── Cuts ─────────────────────────────────────────────────────────────────────
+# ─── Découpe ──────────────────────────────────────────────────────────────────
 
 def merge_intervals(intervals):
     merged = []
@@ -125,15 +118,14 @@ def merge_intervals(intervals):
     return [tuple(x) for x in merged]
 
 
-def to_keep(total_duration, to_remove):
-    keeps = []
-    cursor = 0.0
+def to_keep(total, to_remove):
+    keeps, cursor = [], 0.0
     for s, e in sorted(to_remove):
         if s > cursor + 0.05:
             keeps.append((cursor, s))
         cursor = max(cursor, e)
-    if cursor < total_duration - 0.05:
-        keeps.append((cursor, total_duration))
+    if cursor < total - 0.05:
+        keeps.append((cursor, total))
     return keeps
 
 
@@ -141,24 +133,19 @@ def apply_cuts(video_path, keeps, out_path, tmpdir):
     if not keeps:
         shutil.copy(video_path, out_path)
         return
-
     segments = []
     for i, (s, e) in enumerate(keeps):
         seg = os.path.join(tmpdir, f"seg_{i:04d}.mp4")
         subprocess.run(
-            ["ffmpeg", "-y",
-             "-ss", str(s), "-i", video_path,
-             "-t", str(e - s),
-             "-c", "copy", seg],
+            ["ffmpeg", "-y", "-ss", str(s), "-i", video_path,
+             "-t", str(e - s), "-c", "copy", seg],
             check=True, capture_output=True,
         )
         segments.append(seg)
-
     concat = os.path.join(tmpdir, "concat.txt")
     with open(concat, "w") as f:
         for seg in segments:
             f.write(f"file '{seg}'\n")
-
     subprocess.run(
         ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
          "-i", concat, "-c", "copy", out_path],
@@ -166,114 +153,58 @@ def apply_cuts(video_path, keeps, out_path, tmpdir):
     )
 
 
-# ─── Sous-titres ──────────────────────────────────────────────────────────────
-
-def hex_to_ass(color):
-    if color.startswith("#"):
-        r, g, b = color[1:3], color[3:5], color[5:7]
-        return f"&H00{b}{g}{r}&"
-    return {"white": "&H00FFFFFF&", "black": "&H00000000&"}.get(color, "&H00FFFFFF&")
-
-
 def adjust_words(all_words, keeps):
-    """Recale les timestamps des mots après découpe."""
-    adjusted = []
-    offset = 0.0
+    adjusted, offset = [], 0.0
     for keep_start, keep_end in keeps:
-        seg_words = [w for w in all_words if keep_start <= w["start"] < keep_end]
-        for w in seg_words:
-            adjusted.append({
-                "word": w["word"],
-                "start": w["start"] - keep_start + offset,
-                "end":   min(w["end"], keep_end) - keep_start + offset,
-            })
+        for w in all_words:
+            if keep_start <= w["start"] < keep_end:
+                adjusted.append({
+                    "word":  w["word"],
+                    "start": round(w["start"] - keep_start + offset, 4),
+                    "end":   round(min(w["end"], keep_end) - keep_start + offset, 4),
+                })
         offset += keep_end - keep_start
     return adjusted
 
 
-def build_ass(words, brand):
-    sub = brand.get("subtitles", {})
-    font        = sub.get("font", "Arial")
-    font_size   = sub.get("font_size", 20)
-    primary     = hex_to_ass(sub.get("color_primary", "white"))
-    accent      = hex_to_ass(sub.get("color_accent", "#f59e0b"))
-    position    = sub.get("position", "bottom")
-    per_line    = sub.get("words_per_line", 4)
+# ─── Son de notification ──────────────────────────────────────────────────────
 
-    align   = 2 if position == "bottom" else 8 if position == "top" else 5
-    marginv = 60 if position == "bottom" else 40
-
-    header = f"""[Script Info]
-ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
-WrapStyle: 1
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{font_size},{primary},&H000000FF&,&H00000000&,&H80000000&,-1,0,0,0,100,100,0,0,1,3,1,{align},30,30,{marginv},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-
-    def fmt_time(t):
-        h = int(t // 3600)
-        m = int((t % 3600) // 60)
-        s = t % 60
-        return f"{h}:{m:02d}:{s:05.2f}"
-
-    # Regroupe les mots par lignes
-    lines = [words[i:i + per_line] for i in range(0, len(words), per_line)]
-    events = []
-    for line in lines:
-        for active, aw in enumerate(line):
-            parts = []
-            for idx, w in enumerate(line):
-                txt = w["word"].strip()
-                if idx == active:
-                    parts.append(f"{{\\c{accent}}}{txt}{{\\c{primary}}}")
-                else:
-                    parts.append(txt)
-            text = " ".join(parts)
-            events.append(
-                f"Dialogue: 0,{fmt_time(aw['start'])},{fmt_time(aw['end'])},"
-                f"Default,,0,0,0,,{text}"
-            )
-
-    return header + "\n".join(events) + "\n"
+def generate_notif_sound(out_path):
+    """Génère un petit 'pop' discret avec ffmpeg."""
+    subprocess.run(
+        ["ffmpeg", "-y",
+         "-f", "lavfi",
+         "-i", "sine=frequency=1200:duration=0.12",
+         "-af", "afade=t=out:st=0.07:d=0.05,volume=0.4",
+         "-ar", "44100",
+         out_path],
+        check=True, capture_output=True,
+    )
 
 
-# ─── Assemblage final ─────────────────────────────────────────────────────────
+# ─── Remotion render ──────────────────────────────────────────────────────────
 
-def assemble(derush_path, ass_path, out_path, brand):
-    fmt    = brand.get("format", "vertical")
-    lufs   = brand.get("audio", {}).get("target_lufs", -14)
-
-    if fmt == "vertical":
-        scale = "1080:1920"
-        pad   = "1080:1920:(ow-iw)/2:(oh-ih)/2"
-    else:
-        scale = "1920:1080"
-        pad   = "1920:1080:(ow-iw)/2:(oh-ih)/2"
-
-    # Escape path for ASS filter (backslash on Windows, colon needs escaping)
-    ass_escaped = ass_path.replace("\\", "/").replace(":", "\\:")
-
-    vf = ",".join([
-        f"scale={scale}:force_original_aspect_ratio=decrease",
-        f"pad={pad}",
-        f"ass={ass_escaped}",
-    ])
-    af = f"loudnorm=I={lufs}:TP=-1.5:LRA=11"
+def render_with_remotion(duration_sec, words, brand, out_path, use_notif):
+    sub    = brand.get("subtitles", {})
+    fps    = 30
+    props  = {
+        "videoFile":        "input.mp4",
+        "brollFile":        "broll.mp4",
+        "words":            words,
+        "durationInFrames": max(1, round(duration_sec * fps)),
+        "accentColor":      sub.get("color_accent", "#f59e0b"),
+        "primaryColor":     sub.get("color_primary", "white") if sub.get("color_primary", "white") != "white" else "#ffffff",
+        "fontSize":         sub.get("font_size", 56),
+        "wordsPerLine":     sub.get("words_per_line", 5),
+        "notifFile":        "notif.wav",
+        "useNotif":         use_notif,
+    }
 
     subprocess.run(
-        ["ffmpeg", "-y", "-i", derush_path,
-         "-vf", vf, "-af", af,
-         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-         "-c:a", "aac", "-b:a", "192k",
-         "-movflags", "+faststart",
-         out_path],
+        ["npx", "remotion", "render", "VideoKit",
+         str(Path(out_path).resolve()),
+         f"--props={json.dumps(props)}"],
+        cwd=str(REMOTION_DIR),
         check=True,
     )
 
@@ -281,32 +212,36 @@ def assemble(derush_path, ass_path, out_path, brand):
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python run.py <video.mp4>")
+    parser = argparse.ArgumentParser(description="Claude Video Kit")
+    parser.add_argument("video", help="Vidéo brute (rush)")
+    parser.add_argument("--broll", help="Vidéo B-roll pour la moitié haute", default=None)
+    parser.add_argument("--notif", action="store_true", help="Activer les sons de notification")
+    args = parser.parse_args()
+
+    if not os.path.exists(args.video):
+        print(f"Fichier introuvable : {args.video}")
         sys.exit(1)
 
-    video_path = sys.argv[1]
-    if not os.path.exists(video_path):
-        print(f"Fichier introuvable : {video_path}")
-        sys.exit(1)
+    brand   = load_brand()
+    d_cfg   = brand.get("derush", {})
+    stem    = Path(args.video).stem
+    out_path = str(Path(args.video).parent / f"{stem}_final.mp4")
+    tmpdir  = tempfile.mkdtemp(prefix="kit_")
 
-    brand    = load_brand()
-    d_cfg    = brand.get("derush", {})
-    out_path = Path(video_path).stem + "_final.mp4"
-    tmpdir   = tempfile.mkdtemp(prefix="kit_")
+    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
 
     try:
-        print("1/5  Extraction audio…")
+        print("1/6  Extraction audio…")
         audio_path = os.path.join(tmpdir, "audio.wav")
-        extract_audio(video_path, audio_path)
+        extract_audio(args.video, audio_path)
 
-        print("2/5  Transcription (Whisper)…")
-        result   = transcribe(audio_path, brand)
-        segments = result.get("segments", [])
+        print("2/6  Transcription (Whisper)…")
+        result    = transcribe(audio_path, brand)
+        segments  = result.get("segments", [])
         all_words = flatten_words(segments)
         print(f"     {len(all_words)} mots transcrits")
 
-        print("3/5  Détection silences et reprises…")
+        print("3/6  Détection silences et reprises…")
         silences = detect_silences(
             audio_path,
             d_cfg.get("silence_threshold_db", -35),
@@ -317,7 +252,6 @@ def main():
             d_cfg.get("retake_similarity", 0.75),
             d_cfg.get("retake_window_words", 6),
         )
-
         to_remove = []
         for s, e in silences:
             if e - s > 0.7:
@@ -325,26 +259,39 @@ def main():
         to_remove.extend(retakes)
         to_remove = merge_intervals(to_remove)
 
-        total = get_duration(video_path)
+        total = get_duration(args.video)
         keeps = to_keep(total, to_remove)
         print(f"     {len(silences)} silences, {len(retakes)} reprises → {len(keeps)} segments conservés")
 
-        print("4/5  Découpe vidéo…")
+        print("4/6  Découpe vidéo…")
         derush_path = os.path.join(tmpdir, "derush.mp4")
-        apply_cuts(video_path, keeps, derush_path, tmpdir)
+        apply_cuts(args.video, keeps, derush_path, tmpdir)
+        adjusted = adjust_words(all_words, keeps)
+        duration_derush = get_duration(derush_path)
 
-        print("5/5  Sous-titres + normalisation audio…")
-        adjusted  = adjust_words(all_words, keeps)
-        ass_path  = os.path.join(tmpdir, "subtitles.ass")
-        with open(ass_path, "w", encoding="utf-8") as f:
-            f.write(build_ass(adjusted, brand))
+        print("5/6  Préparation assets Remotion…")
+        shutil.copy(derush_path, PUBLIC_DIR / "input.mp4")
 
-        assemble(derush_path, ass_path, out_path, brand)
+        if args.broll and os.path.exists(args.broll):
+            shutil.copy(args.broll, PUBLIC_DIR / "broll.mp4")
+            print(f"     B-roll : {args.broll}")
+        else:
+            # Pas de B-roll : on duplique la vidéo elle-même en haut
+            shutil.copy(derush_path, PUBLIC_DIR / "broll.mp4")
+            print("     Pas de B-roll fourni — la vidéo sera dupliquée en haut")
+
+        if args.notif:
+            generate_notif_sound(str(PUBLIC_DIR / "notif.wav"))
+            print("     Son de notification généré")
+
+        print("6/6  Rendu Remotion (split screen + animations)…")
+        render_with_remotion(duration_derush, adjusted, brand, out_path, args.notif)
 
         print(f"\nFait ✓  →  {out_path}")
 
     except subprocess.CalledProcessError as e:
-        print(f"\nErreur ffmpeg :\n{e.stderr.decode() if e.stderr else e}")
+        stderr = e.stderr.decode() if e.stderr else ""
+        print(f"\nErreur :\n{stderr or e}")
         sys.exit(1)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
