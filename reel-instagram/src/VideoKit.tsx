@@ -20,6 +20,7 @@ export type VideoKitProps = {
   accentColor: string;
   primaryColor: string;
   bgColor: string;
+  style: 'light' | 'dark';
   fontSize: number;
   wordsPerLine: number;
   popSoundFile: string;
@@ -77,9 +78,10 @@ const WordSpan: React.FC<{
 export const VideoKit: React.FC<VideoKitProps> = ({
   videoFile,
   words,
-  accentColor = '#f59e0b',
-  primaryColor = '#ffffff',
-  bgColor = '#000000',
+  accentColor = '#E02020',
+  primaryColor = '#111111',
+  bgColor = '#ffffff',
+  style = 'light',
   fontSize = 62,
   wordsPerLine = 4,
   popSoundFile = 'pop.wav',
@@ -121,8 +123,14 @@ export const VideoKit: React.FC<VideoKitProps> = ({
     : 1;
   const subtitleScale = interpolate(linePunch, [0, 1], [1.06, 1.0], { extrapolateRight: 'clamp' });
 
-  // Hauteur de la bande sous-titres (30% bas)
-  const subAreaTop = Math.round(height * 0.65);
+  const isLight      = style === 'light';
+  const subAreaTop   = Math.round(height * 0.65);
+  // Style light : fond blanc derrière les sous-titres / Style dark : dégradé noir
+  const subBg        = isLight ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.72)';
+  const gradientEnd  = isLight ? `${bgColor}F0` : `${bgColor}F0`;
+  const textShadow   = isLight
+    ? 'none'
+    : '0 4px 20px rgba(0,0,0,0.95)';
 
   return (
     <AbsoluteFill style={{ background: bgColor }}>
@@ -135,7 +143,7 @@ export const VideoKit: React.FC<VideoKitProps> = ({
         />
       </AbsoluteFill>
 
-      {/* Dégradé bas pour lisibilité sous-titres */}
+      {/* Dégradé bas */}
       <div
         style={{
           position: 'absolute',
@@ -143,7 +151,7 @@ export const VideoKit: React.FC<VideoKitProps> = ({
           left: 0,
           width: '100%',
           height: Math.round(height * 0.42),
-          background: `linear-gradient(to bottom, transparent 0%, ${bgColor}CC 55%, ${bgColor}EE 100%)`,
+          background: `linear-gradient(to bottom, transparent 0%, ${gradientEnd} 60%)`,
           pointerEvents: 'none',
         }}
       />
@@ -159,14 +167,14 @@ export const VideoKit: React.FC<VideoKitProps> = ({
             display: 'flex',
             justifyContent: 'center',
             flexWrap: 'wrap',
-            padding: '0 48px',
+            padding: '0 40px',
             transform: `scale(${subtitleScale})`,
             transformOrigin: 'center top',
           }}
         >
           <div
             style={{
-              display: 'flex',
+              display: 'inline-flex',
               flexWrap: 'wrap',
               justifyContent: 'center',
               fontSize,
@@ -174,8 +182,12 @@ export const VideoKit: React.FC<VideoKitProps> = ({
               fontWeight: 900,
               letterSpacing: '-0.01em',
               lineHeight: 1.2,
-              textShadow: '0 4px 20px rgba(0,0,0,0.9)',
+              textShadow,
+              background: subBg,
+              borderRadius: 18,
+              padding: '14px 28px',
               maxWidth: '100%',
+              boxShadow: isLight ? '0 4px 24px rgba(0,0,0,0.10)' : 'none',
             }}
           >
             {currentLine.map((w, idx) => (

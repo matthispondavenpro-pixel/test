@@ -11,12 +11,14 @@
   "subtitles": {
     "font": "Arial Black",
     "font_size": 62,
-    "color_primary": "#ffffff",
-    "color_accent": "#f59e0b",
+    "color_primary": "#111111",
+    "color_accent": "#E02020",
     "words_per_line": 4
   },
 
-  "bg_color": "#000000",
+  "style": "light",
+
+  "bg_color": "#ffffff",
 
   "derush": {
     "silence_threshold_db": -35,
