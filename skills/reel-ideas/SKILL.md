@@ -4,22 +4,34 @@
 
 ## Ce que tu génères
 
-Une batch de 10 idées minimum, organisées par format. Pour chaque idée :
-- Le hook (première phrase, ce qui stop le scroll)
-- Le format (analyse face cam / résultat de test / erreur commune / process / observation terrain)
-- Le CTA suggéré
+Une liste de 10 idées classées par ordre de faisabilité immédiate — les idées qui nécessitent le moins de prérequis (pas besoin de data, pas besoin de cas client) en premier, les plus exigeantes en dernier.
+
+Pour chaque idée :
+- Le numéro et le hook (première phrase qui stop le scroll)
+- Le format
+- Ce qu'il faut avoir pour la faire (data, résultat client, observation, rien de spécial)
+
+## Process après la liste
+
+Après avoir donné les idées, demande : "T'as des résultats clients, de la data terrain, ou des observations récentes à intégrer ?" Si l'utilisateur dit qu'il n'a pas accès à certaines idées (pas de data, pas encore de clients, pas de tests), retire ces idées et propose des alternatives adaptées à sa situation réelle. L'objectif c'est qu'il puisse tourner le Reel dans les 24h.
 
 ## Les formats disponibles
 
-**Analyse face cam** : tu tombes sur une miniature réelle, tu l'analyses en live. Est-ce qu'elle parle à la vraie douleur de l'avatar ? Est-ce que le bon profil se reconnaît dedans ?
+**Analyse face cam** — prérequis : zéro. Tu prends une miniature réelle visible sur YouTube, tu l'analyses en live. Pas besoin d'accès à leur data — tu raisonnes visuellement.
 
-**Résultat de test** : tu montres un vrai test — deux packagings sur la même vidéo, tu révèles les chiffres jusqu'aux leads/calls/clients.
+**Résultat de test** — prérequis : avoir des chiffres réels (leads, calls, clients) sur au moins deux packagings. Si pas de data réelle, des chiffres fictifs clairement annoncés comme tels.
 
-**Erreur commune** : une erreur que tu vois chez la plupart des infopreneurs sur YouTube. Tu la nommes, tu expliques pourquoi, tu montres ce qu'il faut faire à la place.
+**Erreur commune** — prérequis : zéro. Une erreur que tu observes chez la plupart des infopreneurs sur YouTube. Pas besoin de cas client.
 
-**Process** : tu montres ce que tu fais concrètement — comment tu construis un packaging, comment tu choisis un angle, comment tu combines miniature et titre.
+**Process** — prérequis : zéro. Tu montres ce que tu fais concrètement — ta méthode, ton raisonnement, ton approche.
 
-**Observation terrain** : une observation simple et concrète tirée de ce que tu vois sur YouTube. Pas de conseil — juste ce que tu observes et ce que ça dit.
+**Observation terrain** — prérequis : zéro. Une observation simple tirée de ce que tu vois sur YouTube. Pas de conseil — juste ce que tu constates.
+
+## Classement des idées (ordre à respecter)
+
+1. En premier : formats "analyse face cam", "erreur commune", "observation terrain" — exécutables immédiatement, pas de data nécessaire
+2. En deuxième : format "process" — demande de savoir quoi montrer mais pas de résultats clients
+3. En dernier : format "résultat de test" — nécessite de la data terrain réelle ou fictive assumée
 
 ## Règles pour les idées
 
