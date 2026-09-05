@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
 Claude Video Kit — pipeline gratuit (Whisper + Remotion + ffmpeg)
-Usage: python run.py <video.mp4> [--broll <broll.mp4>] [--notif]
+Usage: python run.py <video.mp4>
 """
 
-import argparse
 import json
 import os
 import shutil
@@ -21,7 +20,7 @@ def load_brand():
         return json.load(f)
 
 
-REPO_ROOT   = Path(__file__).parent.parent
+REPO_ROOT    = Path(__file__).parent.parent
 REMOTION_DIR = REPO_ROOT / "reel-instagram"
 PUBLIC_DIR   = REMOTION_DIR / "public"
 
@@ -38,8 +37,7 @@ def extract_audio(video_path, out_path):
 
 def get_duration(path):
     r = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json",
-         "-show_format", path],
+        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path],
         capture_output=True, text=True, check=True,
     )
     return float(json.loads(r.stdout)["format"]["duration"])
@@ -63,7 +61,7 @@ def detect_silences(audio_path, threshold_db, min_dur):
     return silences
 
 
-# ─── Transcription ─────────────────────────────────────────────────────────────
+# ─── Transcription ────────────────────────────────────────────────────────────
 
 def transcribe(audio_path, brand):
     import whisper
@@ -83,7 +81,7 @@ def flatten_words(segments):
     ]
 
 
-# ─── Reprises ─────────────────────────────────────────────────────────────────
+# ─── Détection reprises ───────────────────────────────────────────────────────
 
 def detect_retakes(segments, similarity, window):
     words = flatten_words(segments)
@@ -167,37 +165,55 @@ def adjust_words(all_words, keeps):
     return adjusted
 
 
-# ─── Son de notification ──────────────────────────────────────────────────────
+# ─── Sons ─────────────────────────────────────────────────────────────────────
 
-def generate_notif_sound(out_path):
-    """Génère un petit 'pop' discret avec ffmpeg."""
+def generate_sounds():
+    """Génère pop.wav et whoosh.wav dans public/."""
+    pop_path    = PUBLIC_DIR / "pop.wav"
+    whoosh_path = PUBLIC_DIR / "whoosh.wav"
+
+    # Pop : courte impulsion sinusoïdale à 1100 Hz
     subprocess.run(
-        ["ffmpeg", "-y",
-         "-f", "lavfi",
-         "-i", "sine=frequency=1200:duration=0.12",
-         "-af", "afade=t=out:st=0.07:d=0.05,volume=0.4",
-         "-ar", "44100",
-         out_path],
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "sine=frequency=1100:duration=0.08",
+         "-af", "afade=t=out:st=0.04:d=0.04,volume=0.5",
+         "-ar", "44100", str(pop_path)],
+        check=True, capture_output=True,
+    )
+
+    # Whoosh : bruit blanc filtré passe-haut, fondu rapide
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "anoisesrc=color=white:duration=0.35",
+         "-af", (
+             "highpass=f=800,"
+             "lowpass=f=5000,"
+             "afade=t=in:st=0:d=0.05,"
+             "afade=t=out:st=0.25:d=0.1,"
+             "volume=0.35"
+         ),
+         "-ar", "44100", str(whoosh_path)],
         check=True, capture_output=True,
     )
 
 
 # ─── Remotion render ──────────────────────────────────────────────────────────
 
-def render_with_remotion(duration_sec, words, brand, out_path, use_notif):
-    sub    = brand.get("subtitles", {})
-    fps    = 30
-    props  = {
+def render_with_remotion(duration_sec, words, brand, out_path):
+    sub  = brand.get("subtitles", {})
+    fps  = 30
+    props = {
         "videoFile":        "input.mp4",
-        "brollFile":        "broll.mp4",
         "words":            words,
         "durationInFrames": max(1, round(duration_sec * fps)),
         "accentColor":      sub.get("color_accent", "#f59e0b"),
-        "primaryColor":     sub.get("color_primary", "white") if sub.get("color_primary", "white") != "white" else "#ffffff",
-        "fontSize":         sub.get("font_size", 56),
-        "wordsPerLine":     sub.get("words_per_line", 5),
-        "notifFile":        "notif.wav",
-        "useNotif":         use_notif,
+        "primaryColor":     sub.get("color_primary", "#ffffff"),
+        "bgColor":          brand.get("bg_color", "#000000"),
+        "fontSize":         sub.get("font_size", 62),
+        "wordsPerLine":     sub.get("words_per_line", 4),
+        "popSoundFile":     "pop.wav",
+        "whooshSoundFile":  "whoosh.wav",
+        "useSounds":        True,
     }
 
     subprocess.run(
@@ -212,28 +228,27 @@ def render_with_remotion(duration_sec, words, brand, out_path, use_notif):
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Claude Video Kit")
-    parser.add_argument("video", help="Vidéo brute (rush)")
-    parser.add_argument("--broll", help="Vidéo B-roll pour la moitié haute", default=None)
-    parser.add_argument("--notif", action="store_true", help="Activer les sons de notification")
-    args = parser.parse_args()
-
-    if not os.path.exists(args.video):
-        print(f"Fichier introuvable : {args.video}")
+    if len(sys.argv) < 2:
+        print("Usage: python run.py <video.mp4>")
         sys.exit(1)
 
-    brand   = load_brand()
-    d_cfg   = brand.get("derush", {})
-    stem    = Path(args.video).stem
-    out_path = str(Path(args.video).parent / f"{stem}_final.mp4")
-    tmpdir  = tempfile.mkdtemp(prefix="kit_")
+    video_path = sys.argv[1]
+    if not os.path.exists(video_path):
+        print(f"Fichier introuvable : {video_path}")
+        sys.exit(1)
+
+    brand  = load_brand()
+    d_cfg  = brand.get("derush", {})
+    stem   = Path(video_path).stem
+    out_path = str(Path(video_path).parent / f"{stem}_final.mp4")
+    tmpdir = tempfile.mkdtemp(prefix="kit_")
 
     PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
 
     try:
         print("1/6  Extraction audio…")
         audio_path = os.path.join(tmpdir, "audio.wav")
-        extract_audio(args.video, audio_path)
+        extract_audio(video_path, audio_path)
 
         print("2/6  Transcription (Whisper)…")
         result    = transcribe(audio_path, brand)
@@ -259,33 +274,22 @@ def main():
         to_remove.extend(retakes)
         to_remove = merge_intervals(to_remove)
 
-        total = get_duration(args.video)
+        total = get_duration(video_path)
         keeps = to_keep(total, to_remove)
         print(f"     {len(silences)} silences, {len(retakes)} reprises → {len(keeps)} segments conservés")
 
         print("4/6  Découpe vidéo…")
         derush_path = os.path.join(tmpdir, "derush.mp4")
-        apply_cuts(args.video, keeps, derush_path, tmpdir)
-        adjusted = adjust_words(all_words, keeps)
+        apply_cuts(video_path, keeps, derush_path, tmpdir)
+        adjusted        = adjust_words(all_words, keeps)
         duration_derush = get_duration(derush_path)
 
-        print("5/6  Préparation assets Remotion…")
+        print("5/6  Génération sons + préparation assets…")
         shutil.copy(derush_path, PUBLIC_DIR / "input.mp4")
+        generate_sounds()
 
-        if args.broll and os.path.exists(args.broll):
-            shutil.copy(args.broll, PUBLIC_DIR / "broll.mp4")
-            print(f"     B-roll : {args.broll}")
-        else:
-            # Pas de B-roll : on duplique la vidéo elle-même en haut
-            shutil.copy(derush_path, PUBLIC_DIR / "broll.mp4")
-            print("     Pas de B-roll fourni — la vidéo sera dupliquée en haut")
-
-        if args.notif:
-            generate_notif_sound(str(PUBLIC_DIR / "notif.wav"))
-            print("     Son de notification généré")
-
-        print("6/6  Rendu Remotion (split screen + animations)…")
-        render_with_remotion(duration_derush, adjusted, brand, out_path, args.notif)
+        print("6/6  Rendu Remotion (animations + sons + charte)…")
+        render_with_remotion(duration_derush, adjusted, brand, out_path)
 
         print(f"\nFait ✓  →  {out_path}")
 

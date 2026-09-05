@@ -5,15 +5,16 @@ import { VideoKit, VideoKitProps } from './VideoKit';
 
 const defaultVideoKitProps: VideoKitProps = {
   videoFile: 'input.mp4',
-  brollFile: 'broll.mp4',
   words: [],
   durationInFrames: 900,
   accentColor: '#f59e0b',
   primaryColor: '#ffffff',
-  fontSize: 56,
-  wordsPerLine: 5,
-  notifFile: 'notif.wav',
-  useNotif: false,
+  bgColor: '#000000',
+  fontSize: 62,
+  wordsPerLine: 4,
+  popSoundFile: 'pop.wav',
+  whooshSoundFile: 'whoosh.wav',
+  useSounds: true,
 };
 
 export const RemotionRoot: React.FC = () => {

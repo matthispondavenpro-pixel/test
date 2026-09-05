@@ -15,15 +15,16 @@ export type Word = { word: string; start: number; end: number };
 
 export type VideoKitProps = {
   videoFile: string;
-  brollFile: string;
   words: Word[];
   durationInFrames: number;
   accentColor: string;
   primaryColor: string;
+  bgColor: string;
   fontSize: number;
   wordsPerLine: number;
-  notifFile: string;
-  useNotif: boolean;
+  popSoundFile: string;
+  whooshSoundFile: string;
+  useSounds: boolean;
 };
 
 function groupLines(words: Word[], n: number): Word[][] {
@@ -32,29 +33,27 @@ function groupLines(words: Word[], n: number): Word[][] {
   return out;
 }
 
+// ─── Mot animé ───────────────────────────────────────────────────────────────
+
 const WordSpan: React.FC<{
   text: string;
   isActive: boolean;
-  wasPast: boolean;
+  isPast: boolean;
   frame: number;
   startFrame: number;
   fps: number;
   accentColor: string;
   primaryColor: string;
-}> = ({ text, isActive, wasPast, frame, startFrame, fps, accentColor, primaryColor }) => {
+}> = ({ text, isActive, isPast, frame, startFrame, fps, accentColor, primaryColor }) => {
   const progress = isActive
-    ? spring({
-        frame: frame - startFrame,
-        fps,
-        config: { damping: 12, stiffness: 280, mass: 0.35 },
-      })
+    ? spring({ frame: frame - startFrame, fps, config: { damping: 10, stiffness: 320, mass: 0.3 } })
     : 1;
 
   const scale = isActive
-    ? interpolate(progress, [0, 1], [1.3, 1], { extrapolateRight: 'clamp' })
+    ? interpolate(progress, [0, 1], [1.35, 1.0], { extrapolateRight: 'clamp' })
     : 1;
 
-  const color = isActive ? accentColor : wasPast ? `${primaryColor}99` : primaryColor;
+  const color = isActive ? accentColor : isPast ? `${primaryColor}70` : primaryColor;
 
   return (
     <span
@@ -64,8 +63,8 @@ const WordSpan: React.FC<{
         transform: `scale(${scale})`,
         transformOrigin: 'center bottom',
         marginRight: 10,
-        transition: 'color 80ms',
-        willChange: 'transform, color',
+        willChange: 'transform',
+        transition: 'color 60ms',
       }}
     >
       {text}
@@ -73,28 +72,30 @@ const WordSpan: React.FC<{
   );
 };
 
+// ─── Composition principale ───────────────────────────────────────────────────
+
 export const VideoKit: React.FC<VideoKitProps> = ({
   videoFile,
-  brollFile,
   words,
   accentColor = '#f59e0b',
   primaryColor = '#ffffff',
-  fontSize = 56,
-  wordsPerLine = 5,
-  notifFile = 'notif.wav',
-  useNotif = false,
+  bgColor = '#000000',
+  fontSize = 62,
+  wordsPerLine = 4,
+  popSoundFile = 'pop.wav',
+  whooshSoundFile = 'whoosh.wav',
+  useSounds = true,
 }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
 
   const lines = groupLines(words, wordsPerLine);
-  const splitY = Math.round(height * 0.5);
 
-  // Ligne active
+  // Ligne et mot actifs
   const currentLineIdx = lines.findIndex((line) => {
     const start = Math.round(line[0].start * fps);
-    const end = Math.round(line[line.length - 1].end * fps);
-    return frame >= start && frame <= end + 2;
+    const end   = Math.round(line[line.length - 1].end * fps);
+    return frame >= start && frame <= end + 3;
   });
 
   const currentLine = currentLineIdx >= 0 ? lines[currentLineIdx] : null;
@@ -105,53 +106,45 @@ export const VideoKit: React.FC<VideoKitProps> = ({
       )
     : -1;
 
-  return (
-    <AbsoluteFill style={{ background: '#000' }}>
-      {/* B-roll — moitié haute */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width,
-          height: splitY,
-          overflow: 'hidden',
-        }}
-      >
-        <Video
-          src={staticFile(brollFile)}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          loop
-          muted
-        />
-      </div>
+  // Zoom d'accroche : démarre à 106%, se stabilise à 100% sur 90 frames
+  const zoomProgress = spring({ frame, fps, config: { damping: 22, stiffness: 40, mass: 1 } });
+  const videoScale   = interpolate(zoomProgress, [0, 1], [1.07, 1.0], { extrapolateRight: 'clamp' });
 
-      {/* Visage — moitié basse */}
-      <div
-        style={{
-          position: 'absolute',
-          top: splitY,
-          left: 0,
-          width,
-          height: height - splitY,
-          overflow: 'hidden',
-        }}
-      >
+  // Punch de ligne : quand une nouvelle ligne apparaît, léger push
+  const lineStartFrame = currentLine ? Math.round(currentLine[0].start * fps) : 0;
+  const linePunch = currentLine
+    ? spring({
+        frame: frame - lineStartFrame,
+        fps,
+        config: { damping: 14, stiffness: 400, mass: 0.25 },
+      })
+    : 1;
+  const subtitleScale = interpolate(linePunch, [0, 1], [1.06, 1.0], { extrapolateRight: 'clamp' });
+
+  // Hauteur de la bande sous-titres (30% bas)
+  const subAreaTop = Math.round(height * 0.65);
+
+  return (
+    <AbsoluteFill style={{ background: bgColor }}>
+
+      {/* Vidéo plein écran avec zoom d'accroche */}
+      <AbsoluteFill style={{ transform: `scale(${videoScale})`, transformOrigin: 'center center' }}>
         <Video
           src={staticFile(videoFile)}
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
         />
-      </div>
+      </AbsoluteFill>
 
-      {/* Ligne de séparation */}
+      {/* Dégradé bas pour lisibilité sous-titres */}
       <div
         style={{
           position: 'absolute',
-          top: splitY - 2,
+          bottom: 0,
           left: 0,
-          width,
-          height: 4,
-          background: 'rgba(255,255,255,0.15)',
+          width: '100%',
+          height: Math.round(height * 0.42),
+          background: `linear-gradient(to bottom, transparent 0%, ${bgColor}CC 55%, ${bgColor}EE 100%)`,
+          pointerEvents: 'none',
         }}
       />
 
@@ -160,50 +153,64 @@ export const VideoKit: React.FC<VideoKitProps> = ({
         <div
           style={{
             position: 'absolute',
-            top: splitY + 28,
+            top: subAreaTop,
             left: 0,
             width,
             display: 'flex',
             justifyContent: 'center',
             flexWrap: 'wrap',
-            padding: '14px 36px 18px',
-            fontSize,
-            fontFamily: '"Arial Black", Arial, sans-serif',
-            fontWeight: 900,
-            letterSpacing: '-0.01em',
-            lineHeight: 1.15,
-            textShadow:
-              '0 3px 14px rgba(0,0,0,0.95), 0 0 40px rgba(0,0,0,0.75)',
-            background: 'rgba(0,0,0,0.28)',
+            padding: '0 48px',
+            transform: `scale(${subtitleScale})`,
+            transformOrigin: 'center top',
           }}
         >
-          {currentLine.map((w, idx) => (
-            <WordSpan
-              key={`${currentLineIdx}-${idx}`}
-              text={w.word.trim()}
-              isActive={idx === activeWordIdx}
-              wasPast={activeWordIdx > -1 && idx < activeWordIdx}
-              frame={frame}
-              startFrame={Math.round(w.start * fps)}
-              fps={fps}
-              accentColor={accentColor}
-              primaryColor={primaryColor}
-            />
-          ))}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+              fontSize,
+              fontFamily: '"Arial Black", "Helvetica Neue", Arial, sans-serif',
+              fontWeight: 900,
+              letterSpacing: '-0.01em',
+              lineHeight: 1.2,
+              textShadow: '0 4px 20px rgba(0,0,0,0.9)',
+              maxWidth: '100%',
+            }}
+          >
+            {currentLine.map((w, idx) => (
+              <WordSpan
+                key={`${currentLineIdx}-${idx}`}
+                text={w.word.trim()}
+                isActive={idx === activeWordIdx}
+                isPast={activeWordIdx > -1 && idx < activeWordIdx}
+                frame={frame}
+                startFrame={Math.round(w.start * fps)}
+                fps={fps}
+                accentColor={accentColor}
+                primaryColor={primaryColor}
+              />
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Sons de notification (un son discret par mot) */}
-      {useNotif &&
+      {/* Son : pop sur chaque mot */}
+      {useSounds &&
         words.map((w, i) => (
-          <Sequence
-            key={i}
-            from={Math.round(w.start * fps)}
-            durationInFrames={Math.round(fps * 0.25)}
-          >
-            <Audio src={staticFile(notifFile)} volume={0.1} />
+          <Sequence key={`pop-${i}`} from={Math.round(w.start * fps)} durationInFrames={Math.round(fps * 0.2)}>
+            <Audio src={staticFile(popSoundFile)} volume={0.18} />
           </Sequence>
         ))}
+
+      {/* Son : whoosh sur chaque nouvelle ligne */}
+      {useSounds &&
+        lines.map((line, i) => (
+          <Sequence key={`whoosh-${i}`} from={Math.round(line[0].start * fps)} durationInFrames={Math.round(fps * 0.4)}>
+            <Audio src={staticFile(whooshSoundFile)} volume={0.22} />
+          </Sequence>
+        ))}
+
     </AbsoluteFill>
   );
 };
