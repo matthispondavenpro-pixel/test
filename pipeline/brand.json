@@ -1,0 +1,30 @@
+{
+  "platform": "instagram",
+  "format": "vertical",
+
+  "transcription": {
+    "provider": "whisper",
+    "model": "base",
+    "language": "fr"
+  },
+
+  "subtitles": {
+    "font": "Arial",
+    "font_size": 20,
+    "color_primary": "white",
+    "color_accent": "#f59e0b",
+    "position": "bottom",
+    "words_per_line": 4
+  },
+
+  "derush": {
+    "silence_threshold_db": -35,
+    "min_silence_duration_sec": 0.6,
+    "retake_similarity": 0.75,
+    "retake_window_words": 6
+  },
+
+  "audio": {
+    "target_lufs": -14
+  }
+}
